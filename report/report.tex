@@ -1,0 +1,378 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{figures/}}
+
+\begin{document}
+
+\title{Reproducing Soft-Attention for Multi-Class Skin Lesion Classification on HAM10000, and a Focal-Loss Hypothesis for Melanoma Recall}
+
+\author{
+\IEEEauthorblockN{Navnit Naman}
+\IEEEauthorblockA{\textit{Newton School of Technology}\\
+\textit{Rishihood University}\\
+230085}
+\and
+\IEEEauthorblockN{Kanhaiya Kumar}
+\IEEEauthorblockA{\textit{Newton School of Technology}\\
+\textit{Rishihood University}\\
+230062}
+}
+
+\maketitle
+
+\begin{abstract}
+We reproduce Datta \emph{et al.}'s ``Soft-Attention Improves Skin Cancer Classification Performance'' (iMIMIC @ MICCAI 2021) on the seven-class HAM10000 benchmark, using the authors' public code ported to TensorFlow~2.20 / Keras~3. We match the original split (9,187 training / 828 test images), the offline augmentation (51,699 images) and both parameter counts (47,550,631 and 47,535,287) exactly. The Inception-ResNet-v2 (IRv2) baseline reproduces within 0.01 of the paper on accuracy (0.916 vs.\ 0.912), weighted precision (0.909 vs.\ 0.906) and weighted AUC (0.978 vs.\ 0.983). With Soft-Attention we obtain 0.913 weighted precision and 0.981 AUC against the reported 0.938 and 0.984, so the paper's +3.2-point gain from attention shrinks to +0.4 points, inside the bootstrap interval of either model. We trace the gap to an unseeded test split, very small minority classes, and checkpoint selection on the test set. The reproduction also shows the baseline's main weakness: despite 91.6\% accuracy it finds only 15 of 34 test melanomas (recall 0.44), mostly by absorbing melanoma and benign keratosis into the nevus class. Because the training set is already balanced by oversampling, we attribute this to easy examples dominating the cross-entropy gradient, and hypothesise that focal loss ($\gamma=2$), as the only change, will raise melanoma recall to 0.50--0.60 while leaving AUC unchanged. No clinical claims are made.
+\end{abstract}
+
+\begin{IEEEkeywords}
+skin lesion classification, melanoma, HAM10000, dermoscopy, reproducibility, soft attention, focal loss, class imbalance
+\end{IEEEkeywords}
+
+%=====================================================================
+\section{Introduction}
+Skin cancer is among the most commonly diagnosed cancers worldwide. Melanoma accounts for only a small fraction of skin-cancer cases but for most skin-cancer deaths, and survival depends strongly on the stage at which it is detected~\cite{esteva2017}. Dermoscopy improves diagnostic accuracy over naked-eye examination, but its interpretation is subjective and requires substantial training: in a reader study, 58 dermatologists reached a mean melanoma sensitivity of only 86.6\%~\cite{haenssle2018}. This has motivated a decade of work on automated classification of dermatoscopic images, beginning with the demonstration that a single ImageNet-pretrained convolutional neural network (CNN) can match board-certified dermatologists on binary tasks~\cite{esteva2017}.
+
+For multi-class lesion classification, the HAM10000 dataset~\cite{tschandl2018} has become the standard public benchmark. Two of its properties make published results harder to interpret than headline numbers suggest. First, it is severely imbalanced: melanocytic nevi make up 66.9\% of the images, while dermatofibroma and vascular lesions make up about 1\% each, so accuracy and accuracy-weighted metrics are misleading. Second, the 10,015 images show only 7,470 distinct lesions; unless the data are split by lesion, near-duplicate views leak between training and test sets~\cite{abhishek2025}. Several highly cited results do not survive these checks: some report accuracy on small or pre-augmented test subsets~\cite{shetty2022}, and at least one has been retracted~\cite{densenet2}.
+
+Against this background we chose to \emph{reproduce} rather than to propose a new architecture. Our base paper is Datta \emph{et al.}~\cite{datta2021}, who insert a Soft-Attention module into ImageNet-pretrained backbones and report that IRv2 with Soft-Attention reaches 93.7\% weighted precision and 98.4\% AUC on HAM10000, 3.2 points above the same backbone without attention. We selected it because it is evaluated on HAM10000, it is the only surveyed work whose public code contains both the baseline and the proposed model, and its test set is drawn from single-image lesions, which avoids lesion-level leakage. Our reproduction exposes three properties of the original protocol that the paper does not state: the train/test split is unseeded; the test set also serves as the validation set for checkpoint selection and early stopping; and the code applies an undocumented five-fold class weight to melanoma.
+
+The contributions of this work are:
+\begin{enumerate}
+  \item a verified reproduction of~\cite{datta2021} on HAM10000, with exact agreement in split sizes, augmented-set size and parameter counts, and an itemised list of every porting change;
+  \item an analysis of the reproduction gap, showing that per-class differences are a few images each and that the claimed benefit of Soft-Attention is not distinguishable from noise under the original protocol;
+  \item a single-variable hypothesis (focal loss), stated with its predicted direction, magnitude and mechanism \emph{before} implementation;
+  \item reporting that follows clinical relevance: per-class sensitivity, specificity, AUC and bootstrap/Wilson confidence intervals rather than accuracy alone.
+\end{enumerate}
+
+Section~\ref{sec:related} reviews related work, Section~\ref{sec:data} describes the dataset and metrics, Section~\ref{sec:method} the reproduced method, Section~\ref{sec:results} the results, Section~\ref{sec:gap} the gap and failure analysis, Section~\ref{sec:hyp} our hypothesis and ablation plan, and Section~\ref{sec:limits} limitations.
+
+%=====================================================================
+\section{Related Work}\label{sec:related}
+\subsection{Clinical benchmarks}
+Esteva \emph{et al.}~\cite{esteva2017} trained a single Inception-v3 on 129,450 clinical images and matched 21 dermatologists on biopsy-proven binary tasks, establishing ImageNet transfer learning as sufficient for clinically comparable performance. Haenssle \emph{et al.}~\cite{haenssle2018} supply the human operating point (mean sensitivity 86.6\%, specificity 71.3\% over 58 dermatologists), which is why we treat sensitivity as a primary metric. Tschandl \emph{et al.}~\cite{tschandl2020} showed that AI-assisted clinicians outperform either the AI or the clinician alone, framing such systems as decision support.
+
+\subsection{Datasets and protocols}
+HAM10000~\cite{tschandl2018} documents the multi-source acquisition and, critically, the presence of multiple images per lesion. The ISIC 2017 challenge~\cite{codella2018} standardised fixed partitions and balanced accuracy; the ISIC 2018 Task~3 training set \emph{is} HAM10000.
+
+\subsection{Transfer-learning baselines}
+Chaturvedi \emph{et al.}~\cite{chaturvedi2020} fine-tuned MobileNet (83.1\% accuracy, weighted F1 0.83). Ali \emph{et al.}~\cite{ali2021} fine-tuned EfficientNet B0--B7; B4 was best (87.91\%) and B6/B7 did not improve on it, indicating that capacity is not the binding constraint on HAM10000.
+
+\subsection{Attention, imbalance and augmentation}
+Datta \emph{et al.}~\cite{datta2021} add Soft-Attention to five backbones; IRv2+SA is best. Yao \emph{et al.}~\cite{yao2022} combine RandAugment, DropBlock and class-balanced losses and show a single regularised model can beat ensembles. Perez \emph{et al.}~\cite{perez2018} ablated 13 augmentation scenarios, our template for one-variable ablation. Lin \emph{et al.}~\cite{lin2017focal} proposed focal loss to down-weight easy examples in dense detection, the mechanism behind our hypothesis. Gessert \emph{et al.}~\cite{gessert2020} won ISIC 2019 with a multi-resolution EfficientNet ensemble, beyond our compute budget.
+
+\subsection{Data quality and integrity}
+Abhishek \emph{et al.}~\cite{abhishek2025} documented duplicates, cross-split leakage and label noise in HAM10000 derivatives. Shetty \emph{et al.}~\cite{shetty2022} report 95.18\% on a 280-image test set built with augmentation before the split, so the number is not a valid target. ``DenseNet-II'' (Soft Computing, 2022) has been retracted~\cite{densenet2} and is excluded. Rehman \emph{et al.}~\cite{rehman2022} and the review of Naseri and Safaei~\cite{naseri2025} confirm that CNN transfer learning remains the dominant paradigm.
+
+%=====================================================================
+\section{Problem, Dataset and Metrics}\label{sec:data}
+\subsection{Task}
+Given one RGB dermatoscopic image $x$, predict a label $y$ from the seven HAM10000 diagnostic categories. This is single-label, multi-class classification.
+
+\subsection{HAM10000}
+HAM10000~\cite{tschandl2018} contains 10,015 images ($600\times450$) of 7,470 lesions from two centres (Vienna and Queensland). Table~\ref{tab:classes} gives the class distribution; the largest class is about 58 times larger than the smallest.
+
+\begin{table}[t]
+\caption{HAM10000 class distribution and our test-set composition.}
+\label{tab:classes}
+\centering
+\begin{tabular}{llrrr}
+\toprule
+Code & Diagnosis & Images & \% & Test $n$\\
+\midrule
+nv & Melanocytic nevi & 6,705 & 66.9 & 663\\
+mel & Melanoma & 1,113 & 11.1 & 34\\
+bkl & Benign keratosis & 1,099 & 11.0 & 66\\
+bcc & Basal cell carcinoma & 514 & 5.1 & 26\\
+akiec & Actinic keratoses & 327 & 3.3 & 23\\
+vasc & Vascular lesions & 142 & 1.4 & 10\\
+df & Dermatofibroma & 115 & 1.1 & 6\\
+\midrule
+\multicolumn{2}{l}{Total} & 10,015 & 100.0 & 828\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Metrics}
+Following the paper we report accuracy, weighted-average precision and weighted one-vs-rest (OvR) AUC. Because nv is 80\% of the test set and dominates every weighted average, we additionally report macro precision/recall/F1, macro AUC, per-class sensitivity, specificity and AUC, 95\% bootstrap intervals (1,000 resamples of the test set) and 95\% Wilson intervals for per-class recall. Melanoma recall is our primary clinical metric.
+
+%=====================================================================
+\section{Reproduced Method}\label{sec:method}
+\subsection{Split and augmentation}
+Following the official code, lesions with exactly one image form the test pool; a stratified 15\% of that pool gives the 828-image test set, and all remaining 9,187 images (including every multi-image lesion) form the training set, so no lesion appears on both sides. The authors call \texttt{train\_test\_split} without a seed; we fix \texttt{SEED=42}. Each training class is then augmented offline (rotation $180^\circ$, shift 0.1, zoom 0.1, horizontal/vertical flip) up to $\approx$8,000 images per class, giving 51,699 training images. Augmentation is applied after the split. Fig.~\ref{fig:aug} shows samples.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{augmented_samples.png}
+\caption{Offline-augmented training samples (sanity check from our run).}
+\label{fig:aug}
+\end{figure}
+
+\subsection{Models}
+\textbf{Backbone.} ImageNet Inception-ResNet-v2 at $299\times299$, truncated where the authors truncate it (\texttt{layers[-28]}, an $8\times8\times192$ map inside block \texttt{block8\_9}); all layers trainable.
+
+\textbf{Baseline head.} ReLU $\rightarrow$ Dropout(0.5) $\rightarrow$ Flatten $\rightarrow$ Dense(7, softmax). 47,550,631 parameters.
+
+\textbf{Soft-Attention head.} A Soft-Attention layer with 16 heads produces attention maps by a 3-D convolution over the feature tensor, softmax-normalised over spatial positions and summed; the attention-weighted features and the original features are each max-pooled ($2\times2$), concatenated, and passed through ReLU $\rightarrow$ Dropout(0.5) $\rightarrow$ Flatten $\rightarrow$ Dense(7). 47,535,287 parameters. Following the code rather than the paper text, the 3-D kernel has shape $(C,3,3)$ and there is no learnable scalar $\gamma$ (Eq.~1 of~\cite{datta2021} includes one).
+
+\subsection{Training}
+Adam (lr $=0.01$, $\epsilon=0.1$), categorical cross-entropy, class weight 5.0 on mel (code only, not in the paper), batch size 16, at most 150 epochs with \texttt{steps\_per\_epoch} $=|\text{train}|/10\approx919$, \texttt{ModelCheckpoint} on best validation accuracy and \texttt{EarlyStopping} on validation loss (patience 30). Under the paper's protocol the validation set \emph{is} the test set; we reproduce this faithfully and discuss it in Section~\ref{sec:limits}.
+
+\subsection{Porting changes}
+Table~\ref{tab:port} lists every change. None alters the method.
+
+\begin{table}[t]
+\caption{Changes from the official TF~2.4 code (porting only).}
+\label{tab:port}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}\raggedright
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.30\columnwidth}>{\raggedright\arraybackslash}p{0.38\columnwidth}>{\raggedright\arraybackslash}p{0.22\columnwidth}}
+\toprule
+Original & Ours (TF 2.20 / Keras 3) & Reason\\
+\midrule
+\texttt{ImageData\-Generator} to disk & Same affine transform in OpenCV; same count (51,699) & Removed in Keras 3\\
+\texttt{flow\_from\_\-directory} & \texttt{tf.data}, nearest resize, same \texttt{preprocess\_\-input} & Speed\\
+\texttt{irv2.layers[-28]} & Layer located by graph position; param.\ count checked & Layer order changed\\
+\texttt{keras.backend} Soft-Attention & Same computation in \texttt{tf} ops & API removed\\
+No seed & \texttt{SEED=42} everywhere & Repeatability\\
+1 GPU & IRv2: 1$\times$T4; IRv2+SA: 2$\times$T4 (Mirrored) & Kaggle session\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=====================================================================
+\section{Reproduction Results}\label{sec:results}
+Both runs were trained on Kaggle. IRv2 stopped at epoch 53 (best 52, $\approx$473\,s/epoch); IRv2+SA stopped at epoch 44 (best 38, $\approx$467\,s/epoch). The data pipeline matches the paper exactly: 10,015 images, 7,470 lesions, 9,187/828 split with identical per-class test counts, and 51,699 augmented images.
+
+\subsection{Headline metrics}
+Table~\ref{tab:headline} compares our runs with the paper. Paper values combine Tables~1 and~3 of~\cite{datta2021} with the printed outputs of the authors' notebooks.
+
+\begin{table}[t]
+\caption{Headline metrics: paper vs.\ our reproduction (828 test images).}
+\label{tab:headline}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{IRv2} & \multicolumn{3}{c}{IRv2 + SA}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Metric & Paper & Ours & Gap & Paper & Ours & Gap\\
+\midrule
+Accuracy & 0.912 & \textbf{0.916} & +0.003 & 0.935 & \textbf{0.918} & $-$0.017\\
+Precision (w.) & 0.906 & \textbf{0.909} & +0.003 & 0.938 & \textbf{0.913} & $-$0.025\\
+Precision (macro) & 0.833 & \textbf{0.846} & +0.013 & 0.892 & \textbf{0.835} & $-$0.057\\
+Recall (macro) & 0.689 & \textbf{0.720} & +0.031 & 0.719 & \textbf{0.713} & $-$0.006\\
+F1 (macro) & -- & \textbf{0.773} & & -- & \textbf{0.766} & \\
+AUC (w., OvR) & 0.983 & \textbf{0.978} & $-$0.005 & 0.984 & \textbf{0.981} & $-$0.003\\
+AUC (macro, OvR) & 0.985 & \textbf{0.973} & $-$0.012 & 0.985 & \textbf{0.982} & $-$0.003\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{95\% bootstrap intervals of our runs.}
+\label{tab:boot}
+\centering
+\footnotesize
+\begin{tabular}{lcc}
+\toprule
+Metric & Ours IRv2 & Ours IRv2+SA\\
+\midrule
+Precision (weighted) & 0.887--0.932 & 0.891--0.935\\
+Recall (macro) & 0.636--0.790 & 0.627--0.793\\
+Melanoma recall & 0.267--0.618 & 0.441--0.781\\
+AUC (weighted) & 0.966--0.987 & 0.973--0.989\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Verdict.} The IRv2 baseline is reproduced: accuracy, weighted precision and weighted AUC are within $\pm0.012$ of the paper. IRv2+SA is partly reproduced: AUC matches ($-0.003$) but weighted precision is 0.025 lower. The paper's central claim, +3.2 points of weighted precision from Soft-Attention, is \emph{not} reproduced: we measure +0.4 points, and the bootstrap intervals overlap almost completely (Table~\ref{tab:boot}).
+
+\subsection{Per-class results}
+Table~\ref{tab:perclass} reports per-class metrics and Fig.~\ref{fig:recall} compares per-class recall with the authors' notebook output.
+
+\begin{table*}[t]
+\caption{Per-class results. Prec./Rec./Spec./AUC for ours IRv2 $\rightarrow$ ours IRv2+SA; ``Correct'' is the number of correctly classified test images (paper IRv2 / ours IRv2 / ours SA).}
+\label{tab:perclass}
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lrcccccc}
+\toprule
+Class & $n$ & Correct & Prec. & Rec. & Spec. & AUC\\
+\midrule
+akiec & 23 & 15/12/12 & .857$\to$.706 & .522$\to$.522 & .998$\to$.994 & .986$\to$.987\\
+bcc & 26 & 22/22/21 & .846$\to$.875 & .846$\to$.808 & .995$\to$.996 & .990$\to$.992\\
+bkl & 66 & 29/40/39 & .755$\to$.848 & .606$\to$.591 & .983$\to$.991 & .968$\to$.973\\
+df & 6 & 2/5/4 & 1.00$\to$.800 & .833$\to$.667 & 1.00$\to$.999 & .995$\to$.998\\
+\textbf{mel} & 34 & 19/\textbf{15}/\textbf{21} & .517$\to$.677 & \textbf{.441$\to$.618} & .982$\to$.987 & .915$\to$.969\\
+nv & 663 & 656/656/655 & .947$\to$.940 & .989$\to$.988 & .776$\to$.745 & .981$\to$.982\\
+vasc & 10 & 10/8/8 & 1.00$\to$1.00 & .800$\to$.800 & 1.00$\to$1.00 & .979$\to$.975\\
+\midrule
+Total & 828 & 755/758/760 & & & & \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{recall_comparison.png}
+\caption{Per-class recall: paper IRv2 (authors' notebook output), our IRv2, and our IRv2+SA. One test image is worth 16.7 points of df recall and 10 points of vasc recall.}
+\label{fig:recall}
+\end{figure}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.49\textwidth]{cm_irv2.png}\hfill
+\includegraphics[width=0.49\textwidth]{cm_irv2_sa.png}
+\caption{Confusion matrices (counts and row-normalised recall). Left: our IRv2 baseline. Right: our IRv2 + Soft-Attention. The dominant error in both is minority lesions predicted as nv.}
+\label{fig:cm}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\columnwidth]{roc_irv2.png}
+\caption{One-vs-rest ROC curves of our IRv2 baseline. Melanoma has the lowest AUC (0.915).}
+\label{fig:roc}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{curves_irv2.png}
+\caption{Training curves of our IRv2 baseline (``val'' is the test set under the paper's protocol). Training accuracy reaches 0.98 while validation accuracy oscillates between 0.86 and 0.92.}
+\label{fig:curves}
+\end{figure}
+
+%=====================================================================
+\section{Gap and Failure Analysis}\label{sec:gap}
+\subsection{Why our numbers differ from the paper}
+\textbf{(1) A different random test set.} The authors' split is unseeded, so every execution draws a different 828 images. Our test set has the same class counts but different lesions, and the training set changes with it. This is likely the largest single effect.
+
+\textbf{(2) Tiny minority classes.} One image moves df recall by 16.7 points and vasc recall by 10 points; with macro averaging, df alone can swing macro recall by $\pm0.07$. Our +0.031 macro recall on IRv2 comes mostly from df (5/6 vs.\ 2/6) and bkl (+11 images). The 95\% Wilson intervals of every per-class recall overlap the paper's.
+
+\textbf{(3) Noisy training with test-set checkpointing.} Adam at lr $=0.01$ on a fully trainable 47.5\,M-parameter network makes validation accuracy jump several points between consecutive epochs (Fig.~\ref{fig:curves}), in both the authors' log and ours. The checkpoint is the epoch with the best accuracy on the test set, which is $\approx$80\% nv, so minority-class behaviour at that epoch is close to arbitrary. An earlier run of our IRv2 notebook with the same seed reached accuracy 0.920 and melanoma recall 0.706 (24/34), against 0.441 (15/34) in the final run: a 9-image swing with identical code, data and split, due to GPU non-determinism and checkpoint timing.
+
+\textbf{(4) A different operating point, not a worse model.} AUC is threshold-free and matches the paper closely (0.978--0.981 vs.\ 0.983--0.984). The models rank images about equally well; what differs is where the arg-max decision lands for each class.
+
+\textbf{(5) Software and hardware (small).} Keras~2$\rightarrow$3 kernels, an OpenCV re-implementation of the same augmentation, and, for IRv2+SA only, two-GPU training with BatchNorm statistics over 8 instead of 16 images per replica.
+
+\subsection{Why the Soft-Attention gain did not reproduce}
+The paper's +3.2 points compares one run of each model on two different unseeded test sets. Our two runs differ by +0.4 points with overlapping intervals, and the run-to-run variance of a single configuration (cause 3) is as large as the claimed effect. Soft-Attention did change one thing: melanoma recall rose from 15 to 21 of 34, with higher melanoma precision. That is suggestive, but it is inside the single-run interval, and the earlier IRv2 run reached 24/34 without attention. Under the paper's own protocol, IRv2+SA cannot be distinguished from IRv2.
+
+\subsection{What the gap is not}
+It is not a split bug (sizes, per-class counts and the no-shared-lesion assertion all match), not an architecture difference (parameter counts are identical), and not an improvement over the paper (our small gains are within noise).
+
+\subsection{Failure modes of the baseline}
+The most frequent errors are the same for both models: bkl$\rightarrow$nv (19 / 19), mel$\rightarrow$nv (9 / 9), akiec$\rightarrow$nv (4 / 8), mel$\leftrightarrow$bkl (7+6 / 3+4) and nv$\rightarrow$mel (6 / 5). Minority lesions are absorbed into nv, and melanoma and benign keratosis, the classes most similar to nevi under dermoscopy, suffer most (Fig.~\ref{fig:cm}). Fig.~\ref{fig:errors} shows the most confident mistakes, many at $p\approx1.00$. The baseline also memorises the training set (training accuracy 0.98, loss 0.08) while test accuracy stays at 0.90--0.92. Melanoma ranking is reasonable (AUC 0.915) but recall at the arg-max is only 0.44.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{errors_irv2.png}
+\caption{Most confident misclassifications of our IRv2 baseline. Several melanomas and benign keratoses are predicted as nv with $p\approx1.00$.}
+\label{fig:errors}
+\end{figure*}
+
+%=====================================================================
+\section{Hypothesis and Ablation Plan}\label{sec:hyp}
+\subsection{Motivation}
+The training set is already balanced by oversampling ($\approx$5,900--8,000 images per class), so the remaining problem is not class frequency. About 98\% of training examples end up correctly classified; their cross-entropy gradients, individually small, are numerous enough to drown out the few hard, confusable examples (mel/bkl vs.\ nv).
+
+\subsection{Hypothesis (one variable)}
+\emph{Replacing categorical cross-entropy with focal loss ($\gamma=2$)~\cite{lin2017focal} will increase melanoma recall and macro recall on HAM10000, because focal loss down-weights well-classified training examples and concentrates the gradient on hard, confusable lesions.} Focal loss is
+\begin{equation}
+\mathrm{FL}(p_t) = -\alpha\,(1-p_t)^{\gamma}\log(p_t),
+\end{equation}
+which equals cross-entropy at $\gamma=0$. We set $\alpha=1$ so that no class re-weighting is added on top of the existing $\times5$ melanoma weight. Every other setting (backbone, head, split, seed, augmentation, optimiser, schedule, single T4 GPU) is unchanged. We apply the change to the baseline without Soft-Attention, because attention gave no measurable gain in our reproduction.
+
+\textbf{Mechanism.} An example predicted correctly at $p=0.9$ contributes $-\log 0.9\approx0.105$ under cross-entropy but $0.01\times0.105\approx0.001$ under focal loss, 100$\times$ less; a hard example at $p=0.3$ keeps about half its loss. The gradient therefore shifts to the mel/bkl/akiec images the network still confuses with nv, moving the decision boundary away from nv. We do not expect better ranking, so AUC should stay flat while recall rises.
+
+\subsection{Predictions (vs.\ our reproduced IRv2, mean over seeds)}
+\begin{itemize}
+\item Melanoma recall: 0.44 $\rightarrow$ 0.50--0.60 (+2 to +5 of 34).
+\item Macro recall: 0.72 $\rightarrow$ 0.74--0.77.
+\item bkl recall: 0.61 $\rightarrow$ 0.65--0.72; bkl$\rightarrow$nv errors 19 $\rightarrow$ $\leq$14.
+\item Weighted precision unchanged to slightly lower (0.89--0.91); accuracy may dip by $\leq$0.01; nv recall $\approx$0.97--0.98.
+\item Weighted AUC unchanged ($\pm0.005$).
+\end{itemize}
+
+\subsection{Falsification criteria}
+We reject the hypothesis if mean melanoma recall over seeds does not exceed the baseline mean by more than one standard deviation, or if macro recall improves only through df/vasc (6 and 10 images). We record partial support if recall rises but weighted precision falls by more than 0.02, since a threshold change could produce the same trade-off.
+
+\subsection{Risks}
+(i) Run-to-run noise is as large as the predicted effect, so we use $\geq$3 seeds (42, 7, 2024) and report mean $\pm$ std. (ii) Focal-loss values are smaller than cross-entropy, and Adam's large $\epsilon=0.1$ makes it not scale-invariant, so the effective step size changes; we will compare training curves and note this confound. (iii) The checkpoint is still picked on the test set; we will add one run with a lesion-grouped validation split. (iv) Recall gains may cost nv specificity, which we will track.
+
+\begin{table}[t]
+\caption{Ablation plan (Milestone 4). Predictions are written before running.}
+\label{tab:ablation}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Configuration & Seeds & mel rec. & macro rec. & W.\,prec. & W.\,AUC\\
+\midrule
+IRv2, CE (reproduced) & 42 & 0.441 & 0.720 & 0.909 & 0.978\\
+\textbf{IRv2, focal $\gamma{=}2$} & 3 & \emph{0.50--0.60} & \emph{0.74--0.77} & \emph{0.89--0.91} & \emph{$\approx$0.978}\\
+IRv2 + SA (reproduced) & 42 & 0.618 & 0.713 & 0.913 & 0.981\\
+IRv2, focal, clean val. & 42 & -- & -- & -- & --\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{Alternatives considered.} CLAHE preprocessing (our errors are semantic confusions, not low contrast); a backbone swap to EfficientNet-B0 (changes capacity and preprocessing at once, and~\cite{ali2021} shows capacity is not the bottleneck); class-balanced sampling (training is already balanced); removing the test-as-validation leak (an evaluation fix, reported as a side experiment).
+
+\textbf{Compute.} One run takes $\approx$53 epochs $\times$ $\approx$8\,min $\approx$7 GPU-hours on a Kaggle T4; with $\approx$30 GPU-hours per week we plan about four runs per week, starting with focal loss at seed 42 for direct comparison.
+
+%=====================================================================
+\section{Limitations}\label{sec:limits}
+Under the paper's protocol the test set is also the validation set: it drives checkpoint selection and early stopping, so every number in this report, the paper's and ours, is optimistically biased. Each configuration was run once (seed 42), and our own same-seed repeat shows that a single run can move melanoma recall by 9 of 34 images; multi-seed results are planned for Milestone 4. The test set contains only 6 df and 10 vasc images, so per-class estimates for those classes are fragile. Drawing the test set from single-image lesions avoids leakage but may bias it towards easier lesions. The IRv2+SA run used two GPUs, a small deviation in BatchNorm statistics. HAM10000 comes from two centres and a predominantly fair-skinned population, so results should not be assumed to generalise across skin tones or acquisition settings.
+
+\textbf{No clinical claims are made.} Nothing here is validated for diagnostic use; the models are not medical devices, and all metrics are benchmark results on a curated research dataset. Consistent with~\cite{tschandl2020}, the appropriate framing is decision support for a qualified clinician.
+
+%=====================================================================
+\section{Conclusion}
+We reproduced Datta \emph{et al.}'s Soft-Attention pipeline on HAM10000 with an exact match in split, augmentation and model size. The IRv2 baseline reproduces within 0.01 on the paper's headline metrics, but the reported 3.2-point gain from Soft-Attention shrinks to 0.4 points, which is indistinguishable from run-to-run noise under the original protocol. The reproduction shows that the baseline's real weakness is melanoma recall (0.44), driven by minority lesions being absorbed into the nevus class. We hypothesise that focal loss, as a single controlled change, will raise melanoma recall to 0.50--0.60 without changing AUC, and we will test this over multiple seeds in Milestone 4.
+
+\section*{Code and Data Availability}
+\begin{itemize}
+\item Our notebooks, outputs and this report:\\ \url{https://github.com/kanhaiyak23/skin-lesion-soft-attention-reproduction}
+\item Original code:\\ \url{https://github.com/skrantidatta/Attention-based-Skin-Cancer-Classification}
+\item HAM10000: Harvard Dataverse; Kaggle mirror \texttt{kmader/skin-cancer-mnist-ham10000}
+\end{itemize}
+
+%=====================================================================
+\begin{thebibliography}{00}
+\bibitem{esteva2017} A. Esteva, B. Kuprel, R. A. Novoa, J. Ko, S. M. Swetter, H. M. Blau, and S. Thrun, ``Dermatologist-level classification of skin cancer with deep neural networks,'' \emph{Nature}, vol. 542, no. 7639, pp. 115--118, 2017.
+\bibitem{tschandl2018} P. Tschandl, C. Rosendahl, and H. Kittler, ``The HAM10000 dataset, a large collection of multi-source dermatoscopic images of common pigmented skin lesions,'' \emph{Scientific Data}, vol. 5, art. 180161, 2018.
+\bibitem{codella2018} N. C. F. Codella \emph{et al.}, ``Skin lesion analysis toward melanoma detection: A challenge at the 2017 International Symposium on Biomedical Imaging (ISBI), hosted by the International Skin Imaging Collaboration (ISIC),'' in \emph{Proc. IEEE ISBI}, 2018, pp. 168--172.
+\bibitem{haenssle2018} H. A. Haenssle \emph{et al.}, ``Man against machine: diagnostic performance of a deep learning convolutional neural network for dermoscopic melanoma recognition in comparison to 58 dermatologists,'' \emph{Annals of Oncology}, vol. 29, no. 8, pp. 1836--1842, 2018.
+\bibitem{perez2018} F. Perez, C. Vasconcelos, S. Avila, and E. Valle, ``Data augmentation for skin lesion analysis,'' in \emph{ISIC Skin Image Analysis Workshop, MICCAI}, LNCS, Springer, 2018, pp. 303--311.
+\bibitem{chaturvedi2020} S. S. Chaturvedi, K. Gupta, and P. S. Prasad, ``Skin lesion analyser: An efficient seven-way multi-class skin cancer classification using MobileNet,'' in \emph{AMLTA 2020}, AISC vol. 1141, Springer, 2020, pp. 165--176.
+\bibitem{tschandl2020} P. Tschandl \emph{et al.}, ``Human--computer collaboration for skin cancer recognition,'' \emph{Nature Medicine}, vol. 26, no. 8, pp. 1229--1234, 2020.
+\bibitem{datta2021} S. K. Datta, S. M. A. Hashemi, S. N. Srihari, and M. Gao, ``Soft-attention improves skin cancer classification performance,'' in \emph{Interpretability of Machine Intelligence in Medical Image Computing (iMIMIC), MICCAI Workshops}, LNCS vol. 12929, Springer, 2021, pp. 13--23.
+\bibitem{ali2021} K. Ali, Z. A. Shaikh, A. A. Khan, and A. A. Laghari, ``Multiclass skin cancer classification using EfficientNets---A first step towards preventing skin cancer,'' \emph{Machine Learning with Applications}, vol. 5, art. 100036, 2021.
+\bibitem{yao2022} P. Yao \emph{et al.}, ``Single model deep learning on imbalanced small datasets for skin lesion classification,'' \emph{IEEE Trans. Medical Imaging}, vol. 41, no. 5, pp. 1242--1254, 2022.
+\bibitem{gessert2020} N. Gessert, M. Nielsen, M. Shaikh, R. Werner, and A. Schlaefer, ``Skin lesion classification using ensembles of multi-resolution EfficientNets with meta data,'' \emph{MethodsX}, vol. 7, art. 100864, 2020.
+\bibitem{abhishek2025} K. Abhishek, A. Jain, and G. Hamarneh, ``Investigating the quality of DermaMNIST and Fitzpatrick17k dermatological image datasets,'' \emph{Scientific Data}, vol. 12, 2025.
+\bibitem{shetty2022} B. Shetty, R. Fernandes, A. P. Rodrigues, R. Chengoden, S. Bhattacharya, and K. Lakshmanna, ``Skin lesion classification of dermoscopic images using machine learning and convolutional neural network,'' \emph{Scientific Reports}, vol. 12, art. 18134, 2022.
+\bibitem{rehman2022} M. Z. U. Rehman, F. Ahmed, S. A. Alsuhibany, S. S. Jamal, M. Z. Ali, and J. Ahmad, ``Classification of skin cancer lesions using explainable deep learning,'' \emph{Sensors}, vol. 22, no. 18, art. 6915, 2022.
+\bibitem{naseri2025} H. Naseri and A. A. Safaei, ``Diagnosis and prognosis of melanoma from dermoscopy images using machine learning and deep learning: a systematic literature review,'' \emph{BMC Cancer}, vol. 25, art. 75, 2025.
+\bibitem{densenet2} ``Retraction Note: DenseNet-II: an improved deep convolutional neural network for melanoma cancer detection,'' \emph{Soft Computing}, 2026. [Retracted article originally published 2022.]
+\bibitem{lin2017focal} T.-Y. Lin, P. Goyal, R. Girshick, K. He, and P. Doll\'ar, ``Focal loss for dense object detection,'' in \emph{Proc. IEEE ICCV}, 2017, pp. 2980--2988.
+\end{thebibliography}
+
+\end{document}
