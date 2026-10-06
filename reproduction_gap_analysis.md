@@ -101,7 +101,7 @@ One image is worth **16.7 points** of df recall and **10 points** of vasc recall
 ### Cause 3: noisy training, with the checkpoint chosen on the test set
 - The optimiser settings are aggressive: Adam with lr = 0.01 on a fully trainable 47.5 M-parameter network. Validation accuracy jumps by several points between consecutive epochs, both in the authors' log and in ours.
 - `ModelCheckpoint(monitor="val_accuracy")` keeps the best epoch **on the test set**, which is also the validation set in their protocol. That epoch is optimised for overall accuracy, which is about 80 % nv. How the minority classes behave at that epoch is close to random.
-- **Direct evidence:** an earlier IRv2 run of the same notebook (seed 42, screenshot from 4 Oct) gave accuracy 0.920 and **melanoma recall 0.706 (24/34)**. This final run gives **0.441 (15/34)**: a 9-image swing with identical code, data, split and seed. The remaining sources of variation are GPU non-determinism and the epoch the checkpoint happens to land on. *(Confirm that the earlier run used the same settings; if so, cite it in the report as measured run-to-run variance.)*
+- The notebook fixes the seed but does not call `tf.config.experimental.enable_op_determinism()`, so repeated runs can also differ through cuDNN non-determinism and the epoch the checkpoint lands on. With one run per configuration, this run-to-run variance is **not yet measured**; M4 will run multiple seeds.
 
 ### Cause 4: a different operating point, not a worse model
 AUC does not depend on the decision threshold, and it matches the paper closely (0.978–0.981 vs 0.983–0.984). The models rank images about equally well. What differs is where the argmax decision lands for each class: for example, melanoma recall vs melanoma precision, and how many lesions get absorbed into nv.
@@ -116,8 +116,8 @@ AUC does not depend on the decision threshold, and it matches the paper closely 
 
 ### Why the SA improvement did not reproduce
 - The paper's +3.2 pts compares **one run of each model on two different unseeded test sets**. Our two runs differ by +0.4 pts in weighted precision, and the bootstrap intervals overlap almost completely (0.887–0.932 vs 0.891–0.935).
-- The run-to-run variance of a *single* configuration (Cause 3) is as large as the claimed effect. A single pair of runs cannot establish a 3-point gain.
-- SA did change one thing in our runs: **melanoma recall went from 15 to 21 of 34**, with higher melanoma precision too. That is suggestive, but it is within the interval of a single run (0.27–0.62 vs 0.44–0.78), and the earlier IRv2 run already reached 24/34 *without* SA.
+- The run-to-run variance of a single configuration (Cause 3) is unmeasured. A single pair of runs cannot establish a 3-point gain.
+- SA did change one thing in our runs: **melanoma recall went from 15 to 21 of 34**, with higher melanoma precision too. That is suggestive, but the bootstrap intervals overlap (0.27–0.62 vs 0.44–0.78), so one run of each cannot establish it.
 - **Honest conclusion:** under the paper's own protocol we cannot distinguish IRv2+SA from IRv2. Showing an effect would need several seeds.
 
 ---
@@ -133,13 +133,13 @@ Under `PROTOCOL="paper"` **the test set is also the validation set**: it drives 
 ## 7. Consequences for Milestones 3–5
 1. **Our reproduced IRv2 baseline, not the paper's number, is the reference** for our hypothesis.
 2. **Melanoma recall is the weakest clinically important metric:** 0.44 in our baseline, with 9 melanomas called nv and 7 called bkl. This is the target of our hypothesis.
-3. Because a single run varies by up to 9 melanoma images, **the hypothesis must be tested with ≥ 2–3 seeds** and judged by mean ± std, not one number.
+3. Because run-to-run variance is unmeasured and each melanoma is ~3 points of recall, **the hypothesis must be tested with ≥ 2–3 seeds** and judged by mean ± std, not one number.
 4. Use 1 GPU for all further runs, so BatchNorm behaves as in the paper.
 
 ---
 
 ### One-paragraph version for the report / PPT
 
-> We reproduced Datta et al.'s pipeline on HAM10000 using the authors' code, ported to TensorFlow 2.20 / Keras 3. We matched the split (9,187 / 828), the augmentation (51,699 images) and both parameter counts exactly. The Inception-ResNet-v2 baseline reproduces: accuracy 0.916 (paper 0.912), weighted precision 0.909 (0.906), weighted AUC 0.978 (0.983). With Soft-Attention we obtain weighted precision 0.913 and AUC 0.981, against the paper's 0.938 and 0.984. The paper's +3.2-point gain from attention therefore shrinks to +0.4 points, well inside the bootstrap interval of either model. We attribute the gaps to an unseeded random test split in the original code, very small minority classes (6 df, 10 vasc), and checkpoint selection on the test set under a noisy lr = 0.01 schedule. Two runs of our baseline with the same seed differed by 9 of 34 melanoma images. Melanoma recall (0.44) and the absorption of benign-keratosis and melanoma lesions into the nevus class are the main weaknesses of the baseline.
+> We reproduced Datta et al.'s pipeline on HAM10000 using the authors' code, ported to TensorFlow 2.20 / Keras 3. We matched the split (9,187 / 828), the augmentation (51,699 images) and both parameter counts exactly. The Inception-ResNet-v2 baseline reproduces: accuracy 0.916 (paper 0.912), weighted precision 0.909 (0.906), weighted AUC 0.978 (0.983). With Soft-Attention we obtain weighted precision 0.913 and AUC 0.981, against the paper's 0.938 and 0.984. The paper's +3.2-point gain from attention therefore shrinks to +0.4 points, well inside the bootstrap interval of either model. We attribute the gaps to an unseeded random test split in the original code, very small minority classes (6 df, 10 vasc), and checkpoint selection on the test set under a noisy lr = 0.01 schedule. Melanoma recall (0.44) and the absorption of benign-keratosis and melanoma lesions into the nevus class are the main weaknesses of the baseline.
 
 *No clinical claims are made.*

@@ -68,7 +68,7 @@ Focal loss: FL(p_t) = −(1 − p_t)^γ · log(p_t). With γ = 0 it is exactly c
 ## 5. Risks we already see
 | Risk | Why | What we will check |
 |---|---|---|
-| **Run-to-run noise is as large as the predicted effect** | Two baseline runs with the same seed gave mel recall 0.44 and 0.71 | ≥ 2–3 seeds per config; report mean ± std |
+| **Run-to-run noise may be as large as the predicted effect** | One run per config so far; no deterministic GPU ops; 1 melanoma ≈ 3 pts recall | ≥ 2–3 seeds per config; report mean ± std |
 | **Effective learning rate changes** | Focal loss values are smaller than CE, and Adam's ε = 0.1 is large, so Adam is *not* scale-invariant here: smaller gradients mean smaller steps | Compare training curves; note it as a confound |
 | **Checkpoint picked on the test set** | The paper's protocol | Also report one `PROTOCOL="clean"` run |
 | **Recall gain comes at nv's expense** | More minority predictions bring more nv false positives | Track nv recall and specificity |

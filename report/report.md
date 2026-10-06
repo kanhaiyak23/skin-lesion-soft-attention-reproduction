@@ -179,12 +179,12 @@ Both runs were trained on Kaggle. IRv2 stopped at epoch 53 (best 52, ≈473 s/ep
 ### A. Why our numbers differ from the paper
 1. **A different random test set.** The authors' split is unseeded, so every execution draws a different 828 images. Our test set has the same class counts but different lesions, and the training set changes with it. This is likely the largest single effect.
 2. **Tiny minority classes.** One image moves df recall by 16.7 points and vasc recall by 10 points; with macro averaging, df alone can swing macro recall by ±0.07. Our +0.031 macro recall on IRv2 comes mostly from df (5/6 vs. 2/6) and bkl (+11 images). The 95 % Wilson intervals of every per-class recall overlap the paper's.
-3. **Noisy training with test-set checkpointing.** Adam at lr = 0.01 on a fully trainable 47.5 M-parameter network makes validation accuracy jump several points between consecutive epochs (Fig. 5). The checkpoint is the epoch with the best accuracy on the test set, which is ≈80 % nv, so minority-class behaviour at that epoch is close to arbitrary. An earlier run of our IRv2 notebook with the same seed reached accuracy 0.920 and melanoma recall 0.706 (24/34), against 0.441 (15/34) in the final run: a 9-image swing with identical code, data and split.
+3. **Noisy training with test-set checkpointing.** Adam at lr = 0.01 on a fully trainable 47.5 M-parameter network makes validation accuracy jump several points between consecutive epochs (Fig. 5). The checkpoint is the epoch with the best accuracy on the test set, which is ≈80 % nv, so minority-class behaviour at that epoch is close to arbitrary. Our notebook fixes the seed but does not enable deterministic GPU kernels, so repeated runs can also differ through cuDNN non-determinism; with one run per configuration, this run-to-run variance is not yet measured.
 4. **A different operating point, not a worse model.** AUC is threshold-free and matches the paper closely (0.978–0.981 vs. 0.983–0.984). The models rank images about equally well; what differs is where the arg-max decision lands for each class.
 5. **Software and hardware (small).** Keras 2 → 3 kernels, an OpenCV re-implementation of the same augmentation, and, for IRv2+SA only, two-GPU training with BatchNorm statistics over 8 instead of 16 images per replica.
 
 ### B. Why the Soft-Attention gain did not reproduce
-The paper's +3.2 points compares one run of each model on two different unseeded test sets. Our two runs differ by +0.4 points with overlapping intervals, and the run-to-run variance of a single configuration is as large as the claimed effect. Soft-Attention did change one thing: melanoma recall rose from 15 to 21 of 34, with higher melanoma precision. That is suggestive, but it is inside the single-run interval, and the earlier IRv2 run reached 24/34 without attention. **Under the paper's own protocol, IRv2+SA cannot be distinguished from IRv2.**
+The paper's +3.2 points compares one run of each model on two different unseeded test sets. Our two runs differ by +0.4 points with overlapping intervals, and with a single run per model the run-to-run variance is unknown, so a 3-point claim cannot be established from one pair of runs. Soft-Attention did change one thing: melanoma recall rose from 15 to 21 of 34, with higher melanoma precision. That is suggestive, but with only 34 test melanomas the bootstrap intervals overlap (0.27–0.62 vs. 0.44–0.78). **Under the paper's own protocol, IRv2+SA cannot be distinguished from IRv2.**
 
 ### C. What the gap is not
 Not a split bug (sizes, per-class counts and the no-shared-lesion assertion all match), not an architecture difference (parameter counts are identical), and not an improvement over the paper (our small gains are within noise).
@@ -233,7 +233,7 @@ FL(p_t) = −α (1 − p_t)^γ log(p_t), which equals cross-entropy at γ = 0. W
 ### E. Risks
 | Risk | Mitigation |
 |---|---|
-| Run-to-run noise as large as the predicted effect | ≥ 3 seeds (42, 7, 2024); report mean ± std |
+| Run-to-run noise may be as large as the predicted effect (unmeasured; one run per config so far) | ≥ 3 seeds (42, 7, 2024); report mean ± std |
 | Focal-loss values are smaller than CE, and Adam's ε = 0.1 makes it not scale-invariant, so the effective step size changes | Compare training curves; note as a confound |
 | Checkpoint still picked on the test set | Add one run with a lesion-grouped validation split |
 | Recall gains may cost nv specificity | Track nv recall and specificity |
@@ -255,7 +255,7 @@ FL(p_t) = −α (1 − p_t)^γ log(p_t), which equals cross-entropy at γ = 0. W
 
 ## VIII. Limitations
 
-Under the paper's protocol the test set is also the validation set: it drives checkpoint selection and early stopping, so every number in this report, the paper's and ours, is optimistically biased. Each configuration was run once (seed 42), and our own same-seed repeat shows that a single run can move melanoma recall by 9 of 34 images; multi-seed results are planned for Milestone 4. The test set contains only 6 df and 10 vasc images, so per-class estimates for those classes are fragile. Drawing the test set from single-image lesions avoids leakage but may bias it towards easier lesions. The IRv2+SA run used two GPUs, a small deviation in BatchNorm statistics. HAM10000 comes from two centres and a predominantly fair-skinned population, so results should not be assumed to generalise across skin tones or acquisition settings.
+Under the paper's protocol the test set is also the validation set: it drives checkpoint selection and early stopping, so every number in this report, the paper's and ours, is optimistically biased. Each configuration was run once (seed 42), so run-to-run variance is unmeasured; multi-seed results are planned for Milestone 4. The test set contains only 6 df and 10 vasc images, so per-class estimates for those classes are fragile. Drawing the test set from single-image lesions avoids leakage but may bias it towards easier lesions. The IRv2+SA run used two GPUs, a small deviation in BatchNorm statistics. HAM10000 comes from two centres and a predominantly fair-skinned population, so results should not be assumed to generalise across skin tones or acquisition settings.
 
 **No clinical claims are made.** Nothing here is validated for diagnostic use; the models are not medical devices, and all metrics are benchmark results on a curated research dataset. Consistent with [7], the appropriate framing is decision support for a qualified clinician.
 
