@@ -20,7 +20,7 @@ The reproduced IRv2 baseline separates melanoma from other lesions well but rare
 
 With an AUC of 0.915 and a specificity of 0.982, the arg-max decision sits at a very conservative point on the melanoma ROC curve. The model ranks melanomas above most non-melanomas, but `argmax` lets a melanoma win only when its probability beats every other class, and that rarely happens when *nv* holds 80 % of the data.
 
-Hypothesis 1 (focal loss) predicts that changing the training loss will raise melanoma recall. Its own falsification criteria say the result is only *partial support* if the gain "could also be produced by a threshold change". So far no one has measured what a threshold change alone can do. This hypothesis fills that gap.
+Hypothesis 1 (focal loss) predicts that changing the training loss will raise melanoma recall. Its own falsification criteria say a recall gain that costs more than 0.02 weighted precision is only *partial support*, because a threshold change could produce the same trade-off. So far no one has measured what a threshold change alone can do. This hypothesis fills that gap.
 
 ---
 
