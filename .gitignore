@@ -7,3 +7,5 @@ data/
 *.aux
 *.log
 *.out
+work/
+.env

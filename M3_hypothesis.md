@@ -88,6 +88,19 @@ Fill in **after** running. Predictions are written now.
 
 **Compute budget:** one run takes ~53 epochs × ~8 min ≈ **7 GPU-hours** on a Kaggle T4. Kaggle gives ~30 GPU-h/week, so plan for about 4 runs per week. Order: focal seed 42 first, so it is directly comparable to the baseline. Then the extra seeds for both baseline and focal.
 
+### Addendum (2026-11-03, before any M4 run): runs and decision rule
+
+M4 runs **6 trainings** on one GPU type (RunPod RTX 4090): cross-entropy and focal loss, each with seeds **42, 7 and 2024**, exactly as planned above. The CE seed-42 run is repeated because the hardware differs from the M2 Kaggle T4. The §4 rule (focal mean must exceed the CE mean by more than one standard deviation) is applied as written. Because three values give only a rough standard deviation, we add a paired test, fixed now before seeing any result:
+
+- Within each seed, CE and focal are scored on the **same 828 test images**, so they are compared image by image with an exact McNemar test. Melanoma discordant pairs from the three seeds are pooled (102 melanomas in total).
+- **Supported** if the §4 rule holds, focal finds more melanomas than CE on **every** seed, **and** the pooled melanoma McNemar test gives p < 0.05.
+- **Partial support** if the above holds but mean weighted precision falls by more than 0.02 (unchanged from §4).
+- **Rejected** if focal finds no more melanomas than CE on average.
+- **Inconclusive** otherwise, reported as such and not as support.
+- Every run is also scored with the cross-fitted melanoma threshold of H2 (`M3_hypothesis2_threshold.md`), to see whether focal loss does more than a threshold shift would.
+
+The three CE runs also give the first direct measurement of run-to-run variance (the M2 Kaggle run found 15 / 34 melanomas). Code: `train.py` (training), `run_pod.sh` (one run per pod), `M4_analyze.py` (all tables and the verdict).
+
 ### Alternatives we considered (and why not now)
 | Alternative single change | Why not chosen |
 |---|---|
