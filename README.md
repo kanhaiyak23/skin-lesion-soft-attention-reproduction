@@ -13,7 +13,7 @@ on the HAM10000 dataset, followed by our own hypothesis.
 | M2 — Baseline reproduction | `M2_reproduce_datta2021_baseline.ipynb`, Kaggle runs `cv_project_irv2.ipynb` (IRv2) and `cv_project_irv2_sa.ipynb` (IRv2 + Soft-Attention), `reproduction_gap_analysis.md` |
 | M3 — Hypothesis & introduction | `M3_hypothesis.md`, `M3_introduction.md`, `M2_M3_reproduction_hypothesis.pptx` |
 | M3 — Hypothesis 2 (threshold control) | `M3_hypothesis2_threshold.md`, `M3_hypothesis2_threshold.pdf` |
-| M4 — Hypothesis results | `M4_results.md` / `M4_results.pdf`, code `train.py`, `run_pod.sh`, `M4_analyze.py`, `make_m4_figures.py`; per-run outputs in `m4_results/`; results added to the full report (Section VIII) |
+| M4 — Hypothesis results | `M4_results.md` / `M4_results.pdf`, code `train.py`, `run_pod.sh`, `M4_analyze.py`, `make_m4_figures.py`; per-run outputs in `m4_results/`; full write-up in the final report `report/report.tex` (Sections VII–X) |
 | Full report (IEEE format) | `report/report.pdf`, LaTeX source `report/report.tex`, Markdown `report/report.md`, figures in `report/figures/` |
 
 ## Reproduction results
