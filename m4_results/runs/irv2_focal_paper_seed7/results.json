@@ -1,0 +1,106 @@
+{
+  "run": "irv2_focal_paper_seed7",
+  "model": "irv2",
+  "loss": "focal",
+  "protocol": "paper",
+  "seed": 7,
+  "quick_check": false,
+  "tf": "2.20.0",
+  "keras": "3.15.1",
+  "gpu": "/physical_device:GPU:0",
+  "n_train_before_aug": 9187,
+  "n_train_after_aug": 51699,
+  "n_val": 828,
+  "n_test": 828,
+  "epochs_run": 112,
+  "best_epoch": 67,
+  "train_time_h": 4.69,
+  "params": 47550631,
+  "summary": {
+    "accuracy": 0.8599,
+    "balanced_accuracy (=macro recall)": 0.7864,
+    "precision_weighted": 0.9056,
+    "precision_macro": 0.6266,
+    "recall_weighted": 0.8599,
+    "recall_macro": 0.7864,
+    "f1_macro": 0.676,
+    "auc_weighted_ovr": 0.9662,
+    "auc_macro_ovr": 0.9566
+  },
+  "per_class": {
+    "support": {
+      "akiec": 23,
+      "bcc": 26,
+      "bkl": 66,
+      "df": 6,
+      "mel": 34,
+      "nv": 663,
+      "vasc": 10
+    },
+    "precision": {
+      "akiec": 0.56,
+      "bcc": 0.615,
+      "bkl": 0.745,
+      "df": 0.417,
+      "mel": 0.317,
+      "nv": 0.982,
+      "vasc": 0.75
+    },
+    "recall (sensitivity)": {
+      "akiec": 0.609,
+      "bcc": 0.923,
+      "bkl": 0.576,
+      "df": 0.833,
+      "mel": 0.765,
+      "nv": 0.899,
+      "vasc": 0.9
+    },
+    "specificity": {
+      "akiec": 0.986,
+      "bcc": 0.981,
+      "bkl": 0.983,
+      "df": 0.991,
+      "mel": 0.929,
+      "nv": 0.933,
+      "vasc": 0.996
+    },
+    "f1": {
+      "akiec": 0.583,
+      "bcc": 0.738,
+      "bkl": 0.65,
+      "df": 0.556,
+      "mel": 0.448,
+      "nv": 0.939,
+      "vasc": 0.818
+    },
+    "auc": {
+      "akiec": 0.973,
+      "bcc": 0.99,
+      "bkl": 0.896,
+      "df": 0.922,
+      "mel": 0.943,
+      "nv": 0.973,
+      "vasc": 0.999
+    }
+  },
+  "bootstrap_ci": {
+    "2.5%": {
+      "precision_weighted": 0.889,
+      "recall_macro": 0.712,
+      "mel_recall": 0.621,
+      "auc_weighted_ovr": 0.954
+    },
+    "median": {
+      "precision_weighted": 0.908,
+      "recall_macro": 0.791,
+      "mel_recall": 0.765,
+      "auc_weighted_ovr": 0.967
+    },
+    "97.5%": {
+      "precision_weighted": 0.925,
+      "recall_macro": 0.851,
+      "mel_recall": 0.909,
+      "auc_weighted_ovr": 0.977
+    }
+  }
+}

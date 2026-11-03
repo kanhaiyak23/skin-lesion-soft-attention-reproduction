@@ -204,9 +204,16 @@ def main(root):
     elif fl_mean <= ce_mean:
         verdict = "REJECTED: focal finds no more melanomas than cross-entropy on average."
     else:
-        verdict = "INCONCLUSIVE: focal finds more melanomas on average, but not on every seed or not significantly."
+        verdict = ("INCONCLUSIVE (paired rule): focal finds more melanomas on average, "
+                   "but not on every seed or not significantly.")
     print(f"Melanomas found, mean per seed: CE {ce_mean:.1f}, focal {fl_mean:.1f}. "
           f"Pooled McNemar on melanomas: p = {p_pooled:.3f}.\n\n**{verdict}**")
+    # M3 §4, second rejection criterion: macro recall must improve
+    ce_mr = np.mean([m["macro_recall"] for (l, _), m in rows.items() if l == "ce"])
+    fl_mr = np.mean([m["macro_recall"] for (l, _), m in rows.items() if l == "focal"])
+    print(f"\nM3 §4 macro-recall criterion: CE {ce_mr:.3f}, focal {fl_mr:.3f} -> "
+          f"{'improves' if fl_mr > ce_mr else '**does not improve: reject under §4**'}. "
+          f"Weighted precision change: {-wp_drop:+.3f}.")
 
 
 if __name__ == "__main__":
