@@ -101,7 +101,7 @@ On every seed CE is significantly more often right overall. On melanomas, focal 
 
 **H1 is not supported.** Under the addendum's paired rule alone it is *inconclusive* (this is what `M4_analyze.py` prints). The §4 macro-recall criterion, also fixed in advance, rejects it outright. Even if both of those were ignored, the precision drop would cap it at *partial support*. We do not report this as a positive result.
 
-Run-to-run variance is itself a finding. CE melanoma recall ranges from 16 to 26 of 34 across seeds with identical code and data. So M2's single-run comparison (IRv2 15/34 vs IRv2 + SA 21/34) is within one seed's noise. Focal loss is much more stable on melanoma (25–26 of 34) but much less stable overall (accuracy 0.755–0.860).
+Run-to-run variance is itself a finding. CE melanoma recall ranges from 16 to 26 of 34 across seeds with identical code. The seed sets both training randomness and which images form the 828-image test set (same class counts; the three test sets share only 12 images). CE and focal always share their seed's test set, so the paired comparisons are unaffected. So M2's single-run comparison (IRv2 15/34 vs IRv2 + SA 21/34) is within one seed's noise. Focal loss is much more stable on melanoma (25–26 of 34) but much less stable overall (accuracy 0.755–0.860).
 
 ---
 

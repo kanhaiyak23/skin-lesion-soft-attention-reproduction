@@ -84,7 +84,7 @@ Following the paper we report accuracy, weighted precision and weighted one-vs-r
 
 ### A. Split and augmentation
 
-Following the official code, lesions with exactly one image form the test pool; a stratified 15% of that pool gives the 828-image test set, and the remaining 9,187 images form the training set, so no lesion appears on both sides. The authors call `train_test_split` without a seed; we fix `SEED=42`. Each training class is augmented offline (rotation 180°, shift 0.1, zoom 0.1, flips) to ≈8,000 images, giving 51,699 training images (Fig. 1).
+Following the official code, lesions with exactly one image form the test pool; a stratified 15% of that pool gives the 828-image test set, and the remaining 9,187 images form the training set, so no lesion appears on both sides. The authors call `train_test_split` without a seed; we fix `SEED=42` (in M4 the run seed also sets the split, so each seed has its own test set with identical class counts). Each training class is augmented offline (rotation 180°, shift 0.1, zoom 0.1, flips) to ≈8,000 images, giving 51,699 training images (Fig. 1).
 
 ![augmented_samples](figures/augmented_samples.png)
 
@@ -333,7 +333,7 @@ The key comparison is at focal loss's own operating point, specificity ≈0.89. 
 
 ### F. Run-to-run variance
 
-With identical code, data and hardware, CE found 16, 26 or 19 melanomas depending only on the seed (standard deviation 5.1), and its macro recall ranged from 0.722 to 0.808. CE seed 42 on the A40 found 16/34, close to the 15/34 of the M2 Kaggle run.
+With identical code and hardware, CE found 16, 26 or 19 melanomas depending only on the seed (standard deviation 5.1). The seed sets both the training randomness and which single-image lesions form the 828-image test set: the three test sets have the same class counts but share only 12 images. CE and focal loss always share the test set of their seed, so the paired comparisons above are unaffected, and its macro recall ranged from 0.722 to 0.808. CE seed 42 on the A40 found 16/34, close to the 15/34 of the M2 Kaggle run.
 
 ## X. Discussion
 
@@ -341,7 +341,7 @@ With identical code, data and hardware, CE found 16, 26 or 19 melanomas dependin
 
 **Why focal loss underperformed.** Two factors are likely. First, the training set is balanced by oversampling and melanoma already carries a ×5 class weight, so focal loss's down-weighting of easy nv examples adds a second, strong push towards melanoma; the model over-shoots. Second, the paper's optimiser settings (lr 0.01, ε=0.1) were tuned for cross-entropy; with smaller focal-loss values the effective step size and the early-stopping behaviour change, and training became longer and less stable. Tuning these would be a second variable and is left as a separate hypothesis.
 
-**Implications for the base paper.** The seed alone moved CE melanoma recall by 10 images. The M2 difference between IRv2 and IRv2+SA (15 vs. 21 melanomas) and the paper's +3.2-point precision gain both come from single runs on single unseeded splits, and are within this variation. Claims of this kind on HAM10000 need several seeds and paired tests.
+**Implications for the base paper.** The seed alone, through training randomness and the choice of test images, moved CE melanoma recall by 10 images. The M2 difference between IRv2 and IRv2+SA (15 vs. 21 melanomas) and the paper's +3.2-point precision gain both come from single runs on single unseeded splits, and are within this variation. Claims of this kind on HAM10000 need several seeds and paired tests.
 
 **Evaluation practice.** Comparing classifiers at the arg-max rewards whichever model predicts the minority class more often. Melanoma recall should be reported at matched specificity, or alongside AUC, with the threshold chosen on data it is not scored on.
 
